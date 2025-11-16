@@ -153,7 +153,7 @@ USER ${NB_USER}
 WORKDIR /home/${NB_USER}
 
 # --- Copy JupyterLab UI settings files --- #
-COPY --chown=${NB_USER}:users ./jupyter-settings.json /opt/conda/share/jupyter/lab/settings/overrides.json
+COPY --chown=${NB_USER}:users .binder/jupyter-settings.json /opt/conda/share/jupyter/lab/settings/overrides.json
 COPY --chown=${NB_USER}:users webapps.json ${ROS_WS}/src/rvizweb/webapps/app.json
 
 # --- Entrypoint --- #
