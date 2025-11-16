@@ -1,9 +1,7 @@
-# docker-compose-linux.yml
-# docker-compose --file docker-compose-linux.yml up
 version: '3'
 services:
-  jupyter-ros:
-    image: intel4coro/base-notebook:20.04-noetic
+  jupyter-ros2:
+    image: intel4coro/jupyter-ros2:jazzy-py3.12
     build:
       context: ./
       dockerfile: ./Dockerfile
@@ -11,13 +9,14 @@ services:
     tty: true
     ports: 
       - 8888:8888
-    # user: root
-    user: jovyan
-    working_dir: /home/jovyan
+    # privileged: true
+    user: root
+    working_dir: /home/jovyan/work
     command: jupyter lab --allow-root --NotebookApp.token='' --no-browser --ip=0.0.0.0
     entrypoint: ["/home/jovyan/work/entrypoint.sh"]
     volumes:
       - ./:/home/jovyan/work
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
     environment:
       - DISPLAY
       - NVIDIA_DRIVER_CAPABILITIES=all
