@@ -1,22 +1,30 @@
+# docker-compose-linux.yml
+# docker-compose --file docker-compose-linux.yml up
 version: '3'
 services:
-  binder-template:
-    image: binder-template:main
+  jupyter-ros:
+    image: intel4coro/base-notebook:20.04-noetic
     build:
-      context: ../
-      dockerfile: ./binder/Dockerfile
+      context: ./
+      dockerfile: ./Dockerfile
     stdin_open: true
     tty: true
-    # set group id of the host machine, so we can edit contents of the mounted volumes in the jupyterlab
-    user: "jovyan:${GID}"
-    # user: root
-    working_dir: /home/jovyan
-    # entrypoint: /home/jovyan/work/binder/entrypoint.sh
-    command: jupyter lab --allow-root --NotebookApp.token='' --no-browser --ip=0.0.0.0
-    ports:
+    ports: 
       - 8888:8888
+    # user: root
+    user: jovyan
+    working_dir: /home/jovyan
+    command: jupyter lab --allow-root --NotebookApp.token='' --no-browser --ip=0.0.0.0
+    entrypoint: ["/home/jovyan/work/entrypoint.sh"]
     volumes:
-      - ../:/home/jovyan/work:rw
-      # - /tmp/.X11-unix:/tmp/.X11-unix:rw
-    # environment:
-    #   - DISPLAY
+      - ./:/home/jovyan/work
+    environment:
+      - DISPLAY
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
