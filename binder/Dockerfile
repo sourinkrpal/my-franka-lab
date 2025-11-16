@@ -77,14 +77,21 @@ RUN mkdir -p /root/.mujoco
 # Use BuildKit secret for mjkey (recommended). This RUN requires BuildKit:
 #   DOCKER_BUILDKIT=1 docker build --secret id=mjkey,src=./mjkey.txt -t myimage:mujocto .
 # If a local /tmp/mujoco210.tar.gz exists (from COPY), it will be unpacked.
-RUN --mount=type=secret,id=mjkey \
-    if [ -f /tmp/mujoco210.tar.gz ]; then \
-      tar -xzf /tmp/mujoco210.tar.gz -C /root/.mujoco && rm /tmp/mujoco210.tar.gz; \
+# --- Binder-safe MuJoCo unpack (no BuildKit secrets) ---
+# If you want MuJoCo in Binder builds, you MUST have the archive and key in the repo (not recommended for public repos).
+# This block will unpack /tmp/mujoco210.tar.gz if present in the build context
+# and will use /root/.mujoco/mjkey.txt if it was provided by platform admins (or if you added it).
+RUN if [ -f /tmp/mujoco210.tar.gz ]; then \
+      mkdir -p /root/.mujoco && \
+      tar -xzf /tmp/mujoco210.tar.gz -C /root/.mujoco && \
+      rm -f /tmp/mujoco210.tar.gz ; \
     fi && \
-    if [ -f /run/secrets/mjkey ]; then \
-      install -m 600 /run/secrets/mjkey /root/.mujoco/mjkey.txt; \
+    # If a mjkey file was copied into the image (not recommended to commit), ensure correct perms:
+    if [ -f /root/.mujoco/mjkey.txt ]; then \
+      chmod 600 /root/.mujoco/mjkey.txt ; \
     fi && \
-    chown -R root:root /root/.mujoco && chmod -R a+rX /root/.mujoco
+    chown -R root:root /root/.mujoco || true && chmod -R a+rX /root/.mujoco || true
+
 
 # Install mujoco Python bindings (will fail if incompatible with native libs)
 # Remove/comment this line if you prefer to install mujoco only when binaries are present.
