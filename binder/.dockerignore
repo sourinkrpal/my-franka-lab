@@ -1,0 +1,6 @@
+.vscode
+!.gitignore
+**/.ipynb_checkpoints/*
+**/common-lisp-jupyter/*
+README.md
+gpt4all/

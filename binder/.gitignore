@@ -1,0 +1,16 @@
+# Ignore everything in this directory
+**/.ipynb_checkpoints/*
+**/common-lisp-jupyter/*
+moodle
+# Except this file
+!.gitignore
+lti
+nginx
+*hugo*
+.vscode
+backup
+deploy*
+images/rocketchat/
+images/whisper/
+draft.sh
+gpt4all/
