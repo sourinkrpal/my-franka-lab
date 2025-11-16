@@ -123,49 +123,63 @@ RUN echo "source ${ROS_PATH}/setup.bash" >> /home/${NB_USER}/.bashrc
 # Python packages (install as root via conda's pip for stability)
 # -----------------------------------------------------------------------------
 USER root
-SHELL ["conda", "run", "-n", "base", "/bin/bash", "-c"]
+SHELL ["bash", "-lc"]
 
-# Upgrade pip/tooling first
-RUN /opt/conda/bin/pip install --upgrade pip setuptools wheel
-
-# Single pip invocation for Jupyter + extensions + extras (keeps resolver consistent)
-RUN /opt/conda/bin/pip install --no-cache-dir \
-    "jupyterlab~=4.0.0" \
-    jupyter-server-proxy \
-    jupyter-remote-desktop-proxy \
-    jupyter-resource-usage \
-    jupyter-offlinenotebook \
-    jupyter-archive \
-    jupyterlab_execute_time \
-    jupyterlab-language-pack-de-DE \
+# Use mamba/conda-forge for big/core packages to avoid pip -> conda conflicts
+RUN /opt/conda/bin/mamba install -y -c conda-forge \
+    "jupyterlab>=4.0,<5.0" \
+    nodejs>=22 \
     ipywidgets \
     pybullet \
     websockify \
-    autobahn \
-    catkin-tools \
-    cbor2 \
-    cryptography==38.0.4 \
-    empy==3.3.4 \
-    gnupg \
-    sidecar \
-    service_identity \
-    pymongo \
-    Pillow \
-    pycryptodomex \
-    pyyaml==5.3.1 \
-    rosdep \
-    rosinstall \
-    rosinstall-generator \
-    rosdistro \
-    simplejpeg \
-    twisted \
-    vcstool \
-    wstool \
-  && /opt/conda/bin/pip cache purge
+    python-jsonrpc-server \
+    pip \
+  && /opt/conda/bin/mamba clean --all -y
 
+# Then pip-install the remaining packages (log to /tmp/pip-install.log)
+# We run with verbose output and write a log file; if pip fails we cat the log so Binder build shows it.
+RUN /opt/conda/bin/python -m pip install --upgrade pip setuptools wheel && \
+    /opt/conda/bin/pip --version && \
+    /opt/conda/bin/pip install --no-cache-dir \
+      autobahn \
+      catkin-tools \
+      cbor2 \
+      cryptography==38.0.4 \
+      empy==3.3.4 \
+      gnupg \
+      sidecar \
+      service_identity \
+      pymongo \
+      Pillow \
+      pycryptodomex \
+      pyyaml==5.3.1 \
+      rosdep \
+      rosinstall \
+      rosinstall-generator \
+      rosdistro \
+      simplejpeg \
+      twisted \
+      vcstool \
+      wstool \
+    --log /tmp/pip-install.log -v || (echo "PIP INSTALL FAILED - dumping /tmp/pip-install.log" && sed -n '1,300p' /tmp/pip-install.log && false)
+
+# Install URL-based JupyterLab extensions (do these last so we see exact failure)
+RUN /opt/conda/bin/pip install --no-cache-dir \
+    "https://raw.githubusercontent.com/yxzhan/jupyterlab-rviz/master/dist/jupyterlab_rviz-0.3.2.tar.gz" \
+    "https://raw.githubusercontent.com/yxzhan/extension-examples/main/cell-toolbar/dist/jupyterlab_examples_cell_toolbar-0.1.4.tar.gz" \
+    --log /tmp/pip-install.log -v || (echo "Extension pip install failed - dumping /tmp/pip-install.log" && sed -n '1,400p' /tmp/pip-install.log && false)
+
+# Cleanup pip cache to reduce image size
+RUN /opt/conda/bin/pip cache purge || true
+
+# ensure NB_USER owns conda caches if needed
+RUN chown -R ${NB_USER}:users /opt/conda || true
+
+USER ${NB_USER}
 # -----------------------------------------------------------------------------
 # JupyterLab custom extensions
 # -----------------------------------------------------------------------------
+# (kept for compatibility - most extensions installed above; this remains if you need more)
 RUN /opt/conda/bin/pip install \
   https://raw.githubusercontent.com/yxzhan/jupyterlab-rviz/master/dist/jupyterlab_rviz-0.3.2.tar.gz \
   https://raw.githubusercontent.com/yxzhan/extension-examples/main/cell-toolbar/dist/jupyterlab_examples_cell_toolbar-0.1.4.tar.gz
@@ -229,4 +243,3 @@ COPY --chown=${NB_USER}:users webapps.json ${ROS_WS}/src/rvizweb/webapps/app.jso
 COPY --chown=${NB_USER}:users entrypoint.sh /
 ENTRYPOINT ["/entrypoint.sh"]
 CMD [ "start-notebook.sh" ]
-
