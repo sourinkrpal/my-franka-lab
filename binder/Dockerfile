@@ -124,23 +124,30 @@ RUN echo "source ${ROS_PATH}/setup.bash" >> /home/${NB_USER}/.bashrc
 # -----------------------------------------------------------------------------
 USER root
 SHELL ["conda", "run", "-n", "base", "/bin/bash", "-c"]
+
+# Upgrade pip/tooling first
+RUN /opt/conda/bin/pip install --upgrade pip setuptools wheel
+
+# Single pip invocation for Jupyter + extensions + extras (keeps resolver consistent)
 RUN /opt/conda/bin/pip install --no-cache-dir \
+    "jupyterlab~=4.0.0" \
+    jupyter-server-proxy \
+    jupyter-remote-desktop-proxy \
+    jupyter-resource-usage \
+    jupyter-offlinenotebook \
+    jupyter-archive \
+    jupyterlab_execute_time \
+    jupyterlab-language-pack-de-DE \
+    ipywidgets \
+    pybullet \
+    websockify \
     autobahn \
     catkin-tools \
     cbor2 \
     cryptography==38.0.4 \
     empy==3.3.4 \
     gnupg \
-    ipywidgets \
-    "jupyterlab~=4.0.0" \
     sidecar \
-    jupyter-resource-usage \
-    jupyter-offlinenotebook \
-    jupyter-server-proxy \
-    jupyter-remote-desktop-proxy \
-    jupyter-archive \
-    jupyterlab_execute_time \
-    jupyterlab-language-pack-de-DE \
     service_identity \
     pymongo \
     Pillow \
@@ -154,8 +161,7 @@ RUN /opt/conda/bin/pip install --no-cache-dir \
     twisted \
     vcstool \
     wstool \
-    pybullet \
-&& /opt/conda/bin/pip cache purge
+  && /opt/conda/bin/pip cache purge
 
 # -----------------------------------------------------------------------------
 # JupyterLab custom extensions
