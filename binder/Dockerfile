@@ -131,7 +131,7 @@ WORKDIR ${HOME}/work
 COPY --chown=${NB_USER}:users ./ ${HOME}/work
 
 # --- Entrypoint --- #
-COPY --chown=${NB_USER}:users entrypoint.sh /
+COPY --chown=${NB_USER}:users binder/entrypoint.sh /
 ENTRYPOINT ["/entrypoint.sh"]
 CMD [ "start-notebook.sh" ]
 
