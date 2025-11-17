@@ -1,7 +1,10 @@
 FROM intel4coro/base-notebook:20.04-noetic
 
-# --- Give NB_USER sudo permission --- #
+# --- Prevent interactive prompts during package installation --- #
 USER root
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- Give NB_USER sudo permission --- #
 RUN apt update && apt install -y sudo && \
     echo "jovyan ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/jovyan && \
     chmod 0440 /etc/sudoers.d/jovyan
@@ -42,7 +45,8 @@ RUN apt-get -y -qq update \
     # Disable the automatic screenlock since the account password is unknown
  && apt-get -y -qq remove xfce4-screensaver \
  && mkdir -p /opt/install \
- && chown -R $NB_UID:$NB_GID $HOME /opt/install 
+ && chown -R $NB_UID:$NB_GID $HOME /opt/install \
+ && rm -rf /var/lib/apt/lists/*
 
 # Install a VNC server (TurboVNC)
 ENV PATH=/opt/TurboVNC/bin:$PATH
@@ -52,19 +56,21 @@ RUN echo "Installing TurboVNC"; \
     gpg --dearmor >/etc/apt/trusted.gpg.d/TurboVNC.gpg; \
     wget -O /etc/apt/sources.list.d/TurboVNC.list https://raw.githubusercontent.com/TurboVNC/repo/main/TurboVNC.list; \
     apt-get -y -qq update; \
-    apt-get -y -qq install \
+    DEBIAN_FRONTEND=noninteractive apt-get -y -qq install \
+        -o Dpkg::Options::="--force-confdef" \
+        -o Dpkg::Options::="--force-confold" \
         turbovnc \
     ; \
     rm -rf /var/lib/apt/lists/*; \
-    rm /etc/apt/sources.list.d/TurboVNC.list;
+    rm -f /etc/apt/sources.list.d/TurboVNC.list
 
-# Install VNC jupyterlab extension
+# Install VNC jupyterlab extension (use conda to avoid mamba ABI issues)
 USER ${NB_USER}
 RUN conda install -y websockify
 ENV DISPLAY=:1
 
 ###############################################################
-# --- Install MuJoCo 2.1 + mujoco-py (patched for noninteractive builds) --- #
+# --- Install MuJoCo 2.1 + mujoco-py (patched, non-interactive) --- #
 ###############################################################
 USER root
 
@@ -86,8 +92,8 @@ RUN apt-get update && \
 ENV MUJOCO_VERSION=2.1.0
 ENV MUJOCO_DIR=/home/${NB_USER}/.mujoco/mujoco-${MUJOCO_VERSION}
 
-RUN wget -q https://mujoco.org/download/mujoco210-linux-x86_64.tar.gz -O /tmp/mujoco.tar.gz && \
-    mkdir -p /home/${NB_USER}/.mujoco && \
+RUN mkdir -p /home/${NB_USER}/.mujoco && \
+    wget -q https://mujoco.org/download/mujoco210-linux-x86_64.tar.gz -O /tmp/mujoco.tar.gz && \
     tar -xzf /tmp/mujoco.tar.gz -C /home/${NB_USER}/.mujoco && \
     mv /home/${NB_USER}/.mujoco/mujoco210 ${MUJOCO_DIR} && \
     rm /tmp/mujoco.tar.gz && \
@@ -95,14 +101,15 @@ RUN wget -q https://mujoco.org/download/mujoco210-linux-x86_64.tar.gz -O /tmp/mu
 
 ENV LD_LIBRARY_PATH=${MUJOCO_DIR}/bin:${LD_LIBRARY_PATH}
 
-# Install mujoco-py as NB_USER
+# Install mujoco-py as NB_USER (must be after MuJoCo runtime is in place)
 USER ${NB_USER}
 ENV MUJOCO_PY_MUJOCO_PATH=${MUJOCO_DIR}
 RUN pip install --upgrade pip && \
     pip install "mujoco-py<2.2,>=2.1" && \
     pip install PyOpenGL PyOpenGL_accelerate
+
 ###############################################################
-# --- END OF MUJOCO PATCH --- #
+# --- End of MuJoCo block --- #
 ###############################################################
 
 # --- Install ROS2 --- #
@@ -122,16 +129,27 @@ USER root
 RUN add-apt-repository universe
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
 RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
-RUN apt update && \
-    apt upgrade -y && \
-    apt install -y \
-        ros-dev-tools \
-        ros-${ROS_DISTRO}-${ROS_PKG} && \
-    apt clean && \
-    echo "source ${ROS_PATH}/setup.bash" >> /home/${NB_USER}/.bashrc
-RUN rosdep init && \
-    rosdep update && \
-    rosdep fix-permissions
+
+# Robust apt update / upgrade / install for ROS2 block (non-interactive, repair broken packages)
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+RUN set -eux; \
+    apt-get update; \
+    apt-get -y --fix-broken install || true; \
+    dpkg --configure -a || true; \
+    apt-get -y upgrade -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"; \
+    apt-get install -y --no-install-recommends \
+      -o Dpkg::Options::="--force-confdef" \
+      -o Dpkg::Options::="--force-confold" \
+      ros-dev-tools \
+      ros-${ROS_DISTRO}-${ROS_PKG}; \
+    apt-get -y --fix-broken install || true; \
+    dpkg --configure -a || true; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
+
+# Save ROS setup for NB user
+RUN echo "source ${ROS_PATH}/setup.bash" >> /home/${NB_USER}/.bashrc
 
 # --- Install python packages --- #
 USER ${NB_USER}
@@ -160,7 +178,7 @@ RUN pip install setuptools==68.1.2
 
 # --- Install VSCode server --- #
 USER ${NB_USER}
-RUN mamba install -y conda-forge::code-server
+RUN conda install -y conda-forge::code-server
 RUN echo 'alias code="$(which code-server)"' >> ~/.bashrc
 RUN code-server --install-extension ms-python.python \
   && code-server --install-extension ms-toolsai.jupyter
@@ -182,3 +200,4 @@ CMD [ "start-notebook.sh" ]
 USER root
 RUN apt install -y ros-jazzy-topic-based-ros2-control
 USER ${NB_USER}
+
