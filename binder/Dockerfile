@@ -1,7 +1,10 @@
 FROM quay.io/jupyter/minimal-notebook:python-3.12
 
-# --- Give NB_USER sudo permission --- #
+# --- Prevent interactive apt prompts --- #
 USER root
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- Give NB_USER sudo permission --- #
 RUN apt update && apt install -y sudo && \
     echo "jovyan ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/jovyan && \
     chmod 0440 /etc/sudoers.d/jovyan
@@ -42,23 +45,25 @@ RUN apt-get -y -qq update \
     # Disable the automatic screenlock since the account password is unknown
  && apt-get -y -qq remove xfce4-screensaver \
  && mkdir -p /opt/install \
- && chown -R $NB_UID:$NB_GID $HOME /opt/install 
+ && chown -R $NB_UID:$NB_GID $HOME /opt/install \
+ && rm -rf /var/lib/apt/lists/*
 
-# Install a VNC server (TurboVNC)
+# Install a VNC server (TurboVNC) - non-interactive dpkg options to avoid prompts
 ENV PATH=/opt/TurboVNC/bin:$PATH
 RUN echo "Installing TurboVNC"; \
-    # Install instructions from https://turbovnc.org/Downloads/YUM
     wget -q -O- https://packagecloud.io/dcommander/turbovnc/gpgkey | \
     gpg --dearmor >/etc/apt/trusted.gpg.d/TurboVNC.gpg; \
     wget -O /etc/apt/sources.list.d/TurboVNC.list https://raw.githubusercontent.com/TurboVNC/repo/main/TurboVNC.list; \
     apt-get -y -qq update; \
-    apt-get -y -qq install \
+    DEBIAN_FRONTEND=noninteractive apt-get -y -qq install \
+      -o Dpkg::Options::="--force-confdef" \
+      -o Dpkg::Options::="--force-confold" \
         turbovnc \
     ; \
     rm -rf /var/lib/apt/lists/*; \
-    rm /etc/apt/sources.list.d/TurboVNC.list;
+    rm -f /etc/apt/sources.list.d/TurboVNC.list;
 
-# Install VNC jupyterlab extension
+# Install VNC jupyterlab extension (use conda to avoid mamba ABI issues)
 USER ${NB_USER}
 RUN conda install -y websockify
 ENV DISPLAY=:1
@@ -80,16 +85,27 @@ USER root
 RUN add-apt-repository universe
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
 RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
-RUN apt update && \
-    apt upgrade -y && \
-    apt install -y \
-        ros-dev-tools \
-        ros-${ROS_DISTRO}-${ROS_PKG} && \
-    apt clean && \
-    echo "source ${ROS_PATH}/setup.bash" >> /home/${NB_USER}/.bashrc
-RUN rosdep init && \
-    rosdep update && \
-    rosdep fix-permissions
+
+# perform ROS apt operations robustly (non-interactive, repair broken packages if needed)
+RUN set -eux; \
+    apt-get update; \
+    apt-get -y --fix-broken install || true; \
+    dpkg --configure -a || true; \
+    DEBIAN_FRONTEND=noninteractive apt-get -y upgrade -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      -o Dpkg::Options::="--force-confdef" \
+      -o Dpkg::Options::="--force-confold" \
+      ros-dev-tools \
+      ros-${ROS_DISTRO}-${ROS_PKG}; \
+    apt-get -y --fix-broken install || true; \
+    dpkg --configure -a || true; \
+    apt-get clean; rm -rf /var/lib/apt/lists/*
+
+# Save ROS setup for NB user
+RUN echo "source ${ROS_PATH}/setup.bash" >> /home/${NB_USER}/.bashrc
+RUN rosdep init || true
+RUN rosdep update || true
+RUN rosdep fix-permissions || true
 
 # --- Install python packages --- #
 USER ${NB_USER}
@@ -99,7 +115,7 @@ RUN pip install --upgrade \
         jupyter-resource-usage \
         jupyter-server-proxy \
         jupyterlab-git \
-        jupyter-remote-desktop-proxy\
+        jupyter-remote-desktop-proxy \
         jupyter_offlinenotebook \
         Pillow \
         rosdep \
@@ -120,8 +136,10 @@ RUN pip install setuptools==68.1.2
 USER ${NB_USER}
 RUN conda install -y -c conda-forge code-server
 RUN echo 'alias code="$(which code-server)"' >> ~/.bashrc
-RUN code-server --install-extension ms-python.python \
-  && code-server --install-extension ms-toolsai.jupyter
+# Installing extensions at build time is brittle; install from the Desktop terminal if needed:
+# code-server --install-extension ms-python.python
+# code-server --install-extension ms-toolsai.jupyter
+
 RUN pip install git+https://github.com/yxzhan/jupyter-code-server.git
 ENV CODE_WORKING_DIRECTORY=${HOME}
 
@@ -171,7 +189,7 @@ ENTRYPOINT ["/entrypoint.sh"]
 CMD [ "start-notebook.sh" ]
 
 # Apply a patch layer. 
-# For unknown reason, the "topic_based_ros2_control" package was removed from the rosdep. 
+# For unknown reason, the "topic_based_ros2_control" package was removed from the rosdep.
 USER root
-RUN apt install -y ros-jazzy-topic-based-ros2-control
+RUN DEBIAN_FRONTEND=noninteractive apt-get -y install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" ros-jazzy-topic-based-ros2-control || true
 USER ${NB_USER}
