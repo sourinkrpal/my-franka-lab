@@ -1,4 +1,4 @@
-FROM quay.io/jupyter/minimal-notebook:python-3.12
+FROM quay.io/jupyter/minimal-notebook:python-3.10
 
 # --- Give NB_USER sudo permission --- #
 USER root
