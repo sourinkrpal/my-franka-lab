@@ -60,7 +60,7 @@ RUN echo "Installing TurboVNC"; \
 
 # Install VNC jupyterlab extension
 USER ${NB_USER}
-RUN mamba install -y websockify
+RUN conda install -y websockify
 ENV DISPLAY=:1
 
 ###############################################################
