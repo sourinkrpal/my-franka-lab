@@ -1,4 +1,4 @@
-FROM intel4coro/base-notebook:20.04-noetic
+FROM quay.io/jupyter/minimal-notebook:ubuntu-24.04
 
 # --- Prevent interactive prompts during package installation --- #
 USER root
