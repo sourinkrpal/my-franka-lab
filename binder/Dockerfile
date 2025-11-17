@@ -64,22 +64,25 @@ RUN conda install -y websockify
 ENV DISPLAY=:1
 
 ###############################################################
-# --- Install MuJoCo 2.1 + mujoco-py (patched for Ubuntu 24.04) --- #
+# --- Install MuJoCo 2.1 + mujoco-py (patched for noninteractive builds) --- #
 ###############################################################
 USER root
 
-# System dependencies for mujoco-py (Ubuntu 24.04 versions)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    patchelf \
-    libgl1 \
-    mesa-utils \
-    libosmesa6-dev \
-    libglew-dev \
-    libglfw3 \
-    libglfw3-dev \
+# System dependencies for mujoco-py (non-interactive and force dpkg config choices)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      -o Dpkg::Options::="--force-confdef" \
+      -o Dpkg::Options::="--force-confold" \
+      patchelf \
+      libgl1 \
+      mesa-utils \
+      libosmesa6-dev \
+      libglew-dev \
+      libglfw3 \
+      libglfw3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install MuJoCo 2.1.0 (no license needed)
+# Download and install MuJoCo 2.1.0 (no license needed)
 ENV MUJOCO_VERSION=2.1.0
 ENV MUJOCO_DIR=/home/${NB_USER}/.mujoco/mujoco-${MUJOCO_VERSION}
 
