@@ -63,6 +63,45 @@ USER ${NB_USER}
 RUN mamba install -y websockify
 ENV DISPLAY=:1
 
+###############################################################
+# --- Install MuJoCo 2.1 + mujoco-py (added patch) --- #
+###############################################################
+USER root
+
+# System dependencies for mujoco-py
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    patchelf \
+    libgl1-mesa-dev \
+    libgl1-mesa-glx \
+    libosmesa6-dev \
+    libglew-dev \
+    libglfw3 \
+    libglfw3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and install MuJoCo 2.1.0 (no license key required)
+ENV MUJOCO_VERSION=2.1.0
+ENV MUJOCO_DIR=/home/${NB_USER}/.mujoco/mujoco-${MUJOCO_VERSION}
+
+RUN wget -q https://mujoco.org/download/mujoco210-linux-x86_64.tar.gz -O /tmp/mujoco.tar.gz && \
+    mkdir -p /home/${NB_USER}/.mujoco && \
+    tar -xzf /tmp/mujoco.tar.gz -C /home/${NB_USER}/.mujoco && \
+    mv /home/${NB_USER}/.mujoco/mujoco210 ${MUJOCO_DIR} && \
+    rm /tmp/mujoco.tar.gz && \
+    chown -R ${NB_USER}:users /home/${NB_USER}/.mujoco
+
+ENV LD_LIBRARY_PATH=${MUJOCO_DIR}/bin:${LD_LIBRARY_PATH}
+
+# Install mujoco-py as NB_USER
+USER ${NB_USER}
+ENV MUJOCO_PY_MUJOCO_PATH=${MUJOCO_DIR}
+RUN pip install --upgrade pip && \
+    pip install "mujoco-py<2.2,>=2.1" && \
+    pip install PyOpenGL PyOpenGL_accelerate
+###############################################################
+# --- END OF MUJOCO PATCH --- #
+###############################################################
+
 # --- Install ROS2 --- #
 USER root
 ENV ROS_DISTRO=jazzy
