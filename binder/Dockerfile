@@ -127,6 +127,7 @@ RUN pip install --upgrade \
         PySide2 \
         matplotlib \
         opencv-python \
+        mujoco \
     && pip cache purge
 
 # setuptools version of ROS jazzy
@@ -143,40 +144,25 @@ RUN echo 'alias code="$(which code-server)"' >> ~/.bashrc
 RUN pip install git+https://github.com/yxzhan/jupyter-code-server.git
 ENV CODE_WORKING_DIRECTORY=${HOME}
 
-# --- Install PyBullet (simple demo stack) --- #
+# --- Install PyBullet --- #
 USER ${NB_USER}
 RUN pip install --no-cache-dir pybullet panda-gym[pybullet] gymnasium pillow matplotlib
 
-# Create a tiny PyBullet GUI test script (run inside the Desktop terminal)
-USER ${NB_USER}
-RUN mkdir -p ${HOME}/work && \
-    cat > ${HOME}/work/test_pybullet_gui.py <<'PY' && \
-    chmod a+rx ${HOME}/work/test_pybullet_gui.py
-import time
-import pybullet as p
-import pybullet_data
+# ---- Install system libs required by modern mujoco (OpenGL/OSMesa etc) ----
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      libosmesa6 libosmesa6-dev libgl1 mesa-utils \
+      libglew-dev libglfw3 libglfw3-dev patchelf \
+      && rm -rf /var/lib/apt/lists/*
 
-print("Connecting to GUI...")
-p.connect(p.GUI)
-p.setAdditionalSearchPath(pybullet_data.getDataPath())
-p.resetSimulation()
-p.setGravity(0,0,-9.81)
-plane = p.loadURDF("plane.urdf")
-start_pos = [0,0,0]
-start_ori = p.getQuaternionFromEuler([0,0,0])
-try:
-    panda = p.loadURDF("franka_panda/panda.urdf", start_pos, start_ori, useFixedBase=True)
-except Exception:
-    # fallback: if panda URDF not included, just load a simple cube
-    box = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.1,0.1,0.1])
-    body = p.createMultiBody(baseCollisionShapeIndex=box, basePosition=[0,0,0.5])
-print('Starting simulation...')
-for _ in range(600):
-    p.stepSimulation()
-    time.sleep(1./240.)
-p.disconnect()
-print('Done')
-PY
+# ---- Install the Python mujoco binding and example repo ----
+# install under the notebook user so pip packages live in user environment
+USER ${NB_USER}
+RUN pip install --no-cache-dir mujoco && \
+    # optional: clone the menagerie (small) so demos are available in the image
+    git clone --depth 1 https://github.com/google-deepmind/mujoco_menagerie.git ${HOME}/mujoco_menagerie || true
 
 # --- Copy notebooks --- #
 USER ${NB_USER}
