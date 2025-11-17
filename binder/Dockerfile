@@ -1,4 +1,4 @@
-FROM quay.io/jupyter/minimal-notebook:python-3.10
+FROM intel4coro/base-notebook:20.04-noetic
 
 # --- Give NB_USER sudo permission --- #
 USER root
