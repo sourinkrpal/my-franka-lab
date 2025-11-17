@@ -20,7 +20,7 @@ RUN  apt update -qq && apt install -y -qq \
         git \
         byobu \
         tmux \
-        net-tools\
+        net-tools \
         ca-certificates \
         apt-transport-https \
         build-essential \
@@ -137,10 +137,6 @@ RUN pip install setuptools==68.1.2
 USER ${NB_USER}
 RUN conda install -y -c conda-forge code-server
 RUN echo 'alias code="$(which code-server)"' >> ~/.bashrc
-# Installing extensions at build time is brittle; install from the Desktop terminal if needed:
-# code-server --install-extension ms-python.python
-# code-server --install-extension ms-toolsai.jupyter
-
 RUN pip install git+https://github.com/yxzhan/jupyter-code-server.git
 ENV CODE_WORKING_DIRECTORY=${HOME}
 
@@ -157,25 +153,29 @@ RUN apt-get update && \
       libglew-dev libglfw3 libglfw3-dev patchelf \
       && rm -rf /var/lib/apt/lists/*
 
-# ---- Install the Python mujoco binding and example repo ----
-# install under the notebook user so pip packages live in user environment
+# ---- Install the Python mujoco binding ----
 USER ${NB_USER}
-RUN pip install --no-cache-dir mujoco && \
-    # optional: clone the menagerie (small) so demos are available in the image
-    git clone --depth 1 https://github.com/google-deepmind/mujoco_menagerie.git ${HOME}/mujoco_menagerie || true
+RUN pip install --no-cache-dir mujoco
 
-# --- Copy notebooks --- #
+# --- Clone mujoco_menagerie into the requested notebooks folder ---
+# create parent folder and clone under /home/jovyan/work/notebooks/mujoco_menagerie
+USER ${NB_USER}
+RUN mkdir -p ${HOME}/work/notebooks && \
+    git clone --depth 1 https://github.com/google-deepmind/mujoco_menagerie.git ${HOME}/work/notebooks/mujoco_menagerie || true
+
+# --- Copy notebooks (your repo) into the image workspace ---
 USER ${NB_USER}
 WORKDIR ${HOME}/work
 COPY --chown=${NB_USER}:users ./ ${HOME}/work
 
+# ensure demo.ipynb exists where expected (optional sanity check during build)
+# (This won't fail the build; it simply prints a message at build-time.)
+RUN if [ -f "${HOME}/work/demo.ipynb" ]; then echo "Found demo.ipynb"; else echo "WARNING: demo.ipynb not found at ${HOME}/work/demo.ipynb"; fi
+
 # --- Entrypoint --- #
 COPY --chown=${NB_USER}:users binder/entrypoint.sh /
 ENTRYPOINT ["/entrypoint.sh"]
-CMD [ "start-notebook.sh" ]
 
-# Apply a patch layer. 
-# For unknown reason, the "topic_based_ros2_control" package was removed from the rosdep.
-USER root
-RUN DEBIAN_FRONTEND=noninteractive apt-get -y install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" ros-jazzy-topic-based-ros2-control || true
-USER ${NB_USER}
+# Start notebook and open demo.ipynb by default in JupyterLab view
+# note: use NotebookApp.default_url to point to the notebook path under /lab/tree
+CMD ["start-notebook.sh", "--NotebookApp.default_url=/lab/tree/work/demo.ipynb"]
