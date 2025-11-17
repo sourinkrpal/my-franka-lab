@@ -1,10 +1,7 @@
-FROM quay.io/jupyter/minimal-notebook:ubuntu-24.04
-
-# --- Prevent interactive prompts during package installation --- #
-USER root
-ENV DEBIAN_FRONTEND=noninteractive
+FROM quay.io/jupyter/minimal-notebook:python-3.12
 
 # --- Give NB_USER sudo permission --- #
+USER root
 RUN apt update && apt install -y sudo && \
     echo "jovyan ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/jovyan && \
     chmod 0440 /etc/sudoers.d/jovyan
@@ -45,8 +42,7 @@ RUN apt-get -y -qq update \
     # Disable the automatic screenlock since the account password is unknown
  && apt-get -y -qq remove xfce4-screensaver \
  && mkdir -p /opt/install \
- && chown -R $NB_UID:$NB_GID $HOME /opt/install \
- && rm -rf /var/lib/apt/lists/*
+ && chown -R $NB_UID:$NB_GID $HOME /opt/install 
 
 # Install a VNC server (TurboVNC)
 ENV PATH=/opt/TurboVNC/bin:$PATH
@@ -56,61 +52,16 @@ RUN echo "Installing TurboVNC"; \
     gpg --dearmor >/etc/apt/trusted.gpg.d/TurboVNC.gpg; \
     wget -O /etc/apt/sources.list.d/TurboVNC.list https://raw.githubusercontent.com/TurboVNC/repo/main/TurboVNC.list; \
     apt-get -y -qq update; \
-    DEBIAN_FRONTEND=noninteractive apt-get -y -qq install \
-        -o Dpkg::Options::="--force-confdef" \
-        -o Dpkg::Options::="--force-confold" \
+    apt-get -y -qq install \
         turbovnc \
     ; \
     rm -rf /var/lib/apt/lists/*; \
-    rm -f /etc/apt/sources.list.d/TurboVNC.list
+    rm /etc/apt/sources.list.d/TurboVNC.list;
 
-# Install VNC jupyterlab extension (use conda to avoid mamba ABI issues)
+# Install VNC jupyterlab extension
 USER ${NB_USER}
 RUN conda install -y websockify
 ENV DISPLAY=:1
-
-###############################################################
-# --- Install MuJoCo 2.1 + mujoco-py (patched, non-interactive) --- #
-###############################################################
-USER root
-
-# System dependencies for mujoco-py (non-interactive and force dpkg config choices)
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-      -o Dpkg::Options::="--force-confdef" \
-      -o Dpkg::Options::="--force-confold" \
-      patchelf \
-      libgl1 \
-      mesa-utils \
-      libosmesa6-dev \
-      libglew-dev \
-      libglfw3 \
-      libglfw3-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Download and install MuJoCo 2.1.0 (no license needed)
-ENV MUJOCO_VERSION=2.1.0
-ENV MUJOCO_DIR=/home/${NB_USER}/.mujoco/mujoco-${MUJOCO_VERSION}
-
-RUN mkdir -p /home/${NB_USER}/.mujoco && \
-    wget -q https://mujoco.org/download/mujoco210-linux-x86_64.tar.gz -O /tmp/mujoco.tar.gz && \
-    tar -xzf /tmp/mujoco.tar.gz -C /home/${NB_USER}/.mujoco && \
-    mv /home/${NB_USER}/.mujoco/mujoco210 ${MUJOCO_DIR} && \
-    rm /tmp/mujoco.tar.gz && \
-    chown -R ${NB_USER}:users /home/${NB_USER}/.mujoco
-
-ENV LD_LIBRARY_PATH=${MUJOCO_DIR}/bin:${LD_LIBRARY_PATH}
-
-# Install mujoco-py as NB_USER (must be after MuJoCo runtime is in place)
-USER ${NB_USER}
-ENV MUJOCO_PY_MUJOCO_PATH=${MUJOCO_DIR}
-RUN pip install --upgrade pip && \
-    pip install "mujoco-py<2.2,>=2.1" && \
-    pip install PyOpenGL PyOpenGL_accelerate
-
-###############################################################
-# --- End of MuJoCo block --- #
-###############################################################
 
 # --- Install ROS2 --- #
 USER root
@@ -129,27 +80,16 @@ USER root
 RUN add-apt-repository universe
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
 RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
-
-# Robust apt update / upgrade / install for ROS2 block (non-interactive, repair broken packages)
-USER root
-ENV DEBIAN_FRONTEND=noninteractive
-RUN set -eux; \
-    apt-get update; \
-    apt-get -y --fix-broken install || true; \
-    dpkg --configure -a || true; \
-    apt-get -y upgrade -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"; \
-    apt-get install -y --no-install-recommends \
-      -o Dpkg::Options::="--force-confdef" \
-      -o Dpkg::Options::="--force-confold" \
-      ros-dev-tools \
-      ros-${ROS_DISTRO}-${ROS_PKG}; \
-    apt-get -y --fix-broken install || true; \
-    dpkg --configure -a || true; \
-    apt-get clean; \
-    rm -rf /var/lib/apt/lists/*
-
-# Save ROS setup for NB user
-RUN echo "source ${ROS_PATH}/setup.bash" >> /home/${NB_USER}/.bashrc
+RUN apt update && \
+    apt upgrade -y && \
+    apt install -y \
+        ros-dev-tools \
+        ros-${ROS_DISTRO}-${ROS_PKG} && \
+    apt clean && \
+    echo "source ${ROS_PATH}/setup.bash" >> /home/${NB_USER}/.bashrc
+RUN rosdep init && \
+    rosdep update && \
+    rosdep fix-permissions
 
 # --- Install python packages --- #
 USER ${NB_USER}
@@ -178,12 +118,47 @@ RUN pip install setuptools==68.1.2
 
 # --- Install VSCode server --- #
 USER ${NB_USER}
-RUN conda install -y conda-forge::code-server
+RUN conda install -y -c conda-forge code-server
 RUN echo 'alias code="$(which code-server)"' >> ~/.bashrc
 RUN code-server --install-extension ms-python.python \
   && code-server --install-extension ms-toolsai.jupyter
 RUN pip install git+https://github.com/yxzhan/jupyter-code-server.git
 ENV CODE_WORKING_DIRECTORY=${HOME}
+
+# --- Install PyBullet (simple demo stack) --- #
+USER ${NB_USER}
+RUN pip install --no-cache-dir pybullet panda-gym[pybullet] gymnasium pillow matplotlib
+
+# Create a tiny PyBullet GUI test script (run inside the Desktop terminal)
+USER ${NB_USER}
+RUN mkdir -p ${HOME}/work && \
+    cat > ${HOME}/work/test_pybullet_gui.py <<'PY' && \
+    chmod a+rx ${HOME}/work/test_pybullet_gui.py
+import time
+import pybullet as p
+import pybullet_data
+
+print("Connecting to GUI...")
+p.connect(p.GUI)
+p.setAdditionalSearchPath(pybullet_data.getDataPath())
+p.resetSimulation()
+p.setGravity(0,0,-9.81)
+plane = p.loadURDF("plane.urdf")
+start_pos = [0,0,0]
+start_ori = p.getQuaternionFromEuler([0,0,0])
+try:
+    panda = p.loadURDF("franka_panda/panda.urdf", start_pos, start_ori, useFixedBase=True)
+except Exception:
+    # fallback: if panda URDF not included, just load a simple cube
+    box = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.1,0.1,0.1])
+    body = p.createMultiBody(baseCollisionShapeIndex=box, basePosition=[0,0,0.5])
+print('Starting simulation...')
+for _ in range(600):
+    p.stepSimulation()
+    time.sleep(1./240.)
+p.disconnect()
+print('Done')
+PY
 
 # --- Copy notebooks --- #
 USER ${NB_USER}
@@ -200,4 +175,3 @@ CMD [ "start-notebook.sh" ]
 USER root
 RUN apt install -y ros-jazzy-topic-based-ros2-control
 USER ${NB_USER}
-
