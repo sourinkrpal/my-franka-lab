@@ -62,6 +62,72 @@ RUN echo "source ${ROS_PATH}/setup.bash" >> /home/${NB_USER}/.bashrc && \
 # Patch: topic_based_ros2_control
 RUN DEBIAN_FRONTEND=noninteractive apt install -y ros-jazzy-topic-based-ros2-control || true
 
+# -------------------------
+# Multiverse build & setup
+# -------------------------
+ARG MULTIVERSE_DIR=/home/Multiverse/multiverse
+ARG BUILD_DIR=$MULTIVERSE_DIR/build
+ARG MULTIVERSE_REPO=https://github.com/MultiverseAI/multiverse.git
+
+USER root
+
+# install build & python dev dependencies needed by Multiverse
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends \
+      git cmake build-essential python3-venv python3-dev python3-pip \
+      virtualenv virtualenvwrapper swig pkg-config \
+      libeigen3-dev libboost-all-dev libpython3-dev \
+      libssl-dev libglu1-mesa-dev libgl1-mesa-dev libx11-dev \
+      libavcodec-dev libavformat-dev libswscale-dev \
+      && rm -rf /var/lib/apt/lists/*
+
+# Create Multiverse working directories and clone source (or COPY your local source)
+RUN mkdir -p /home/Multiverse && \
+    git clone --depth 1 ${MULTIVERSE_REPO} ${MULTIVERSE_DIR} || true && \
+    chown -R ${NB_USER}:users /home/Multiverse
+
+# Install virtualenvwrapper (system-wide) and create a 'multiverse' virtualenv
+# Use the notebook user to create and own the virtualenv so packages are installed to the NB_USER home
+USER ${NB_USER}
+ENV WORKON_HOME=/home/${NB_USER}/.virtualenvs
+ENV VIRTUALENVWRAPPER_PYTHON=/usr/bin/python3
+RUN python3 -m pip install --upgrade pip setuptools wheel virtualenv virtualenvwrapper && \
+    mkdir -p $WORKON_HOME && \
+    # initialize virtualenvwrapper env startup
+    mkdir -p /home/${NB_USER}/.local/bin && \
+    (echo "export WORKON_HOME=$WORKON_HOME" >> /home/${NB_USER}/.bashrc) && \
+    (echo "export VIRTUALENVWRAPPER_PYTHON=$VIRTUALENVWRAPPER_PYTHON" >> /home/${NB_USER}/.bashrc) && \
+    (echo "source /usr/local/bin/virtualenvwrapper.sh" >> /home/${NB_USER}/.bashrc) || true
+
+# create virtualenv and install python deps into it, using virtualenvwrapper
+# we use bash -lc to source virtualenvwrapper and run workon in the same shell
+RUN /bin/bash -lc "source /usr/local/bin/virtualenvwrapper.sh && mkvirtualenv --system-site-packages multiverse" && \
+    /bin/bash -lc "source /usr/local/bin/virtualenvwrapper.sh && workon multiverse && \
+        pip install --no-cache-dir psutil==5.9.2 pyside6 pyopengl pyside6-wheel cython \
+            owlready2 markupsafe==2.0.1 jinja2 pybind11 urdf_parser_py mujoco==3.2.7 \
+            mujoco-mjx==3.2.7 scipy panel"
+
+# Build Multiverse from source: create build dir, configure and build.
+# We intentionally do two cmake configs in the example (modules off then on) as in your example.
+RUN /bin/bash -lc "source /usr/local/bin/virtualenvwrapper.sh && workon multiverse && \
+        cd $MULTIVERSE_DIR && mkdir -p $BUILD_DIR && \
+        cmake -S $MULTIVERSE_DIR -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX:PATH=$MULTIVERSE_DIR \
+          -DMULTIVERSE_CLIENT_LIBRARY_TYPE=STATIC -DSTDLIB=libstdc++ \
+          -DBUILD_SRC=ON -DBUILD_MODULES=OFF -DBUILD_CONNECTORS=OFF -DBUILD_KNOWLEDGE=OFF -DBUILD_PARSER=OFF -DBUILD_TESTS=OFF && \
+        cmake -S $MULTIVERSE_DIR -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX:PATH=$MULTIVERSE_DIR \
+          -DMULTIVERSE_CLIENT_LIBRARY_TYPE=STATIC -DSTDLIB=libstdc++ \
+          -DBUILD_MODULES=ON -DBUILD_CONNECTORS=ON -DBUILD_KNOWLEDGE=OFF -DBUILD_PARSER=OFF -DBUILD_TESTS=OFF && \
+        make -C $BUILD_DIR -j$(nproc) && cmake --install $BUILD_DIR"
+
+# ensure NB_USER owns installed Multiverse files
+USER root
+RUN chown -R ${NB_USER}:users /home/Multiverse || true
+
+# export PYTHONPATH and auto-activate multiverse virtualenv on shell login
+USER ${NB_USER}
+RUN echo "export PYTHONPATH=\$PYTHONPATH:$MULTIVERSE_DIR/lib/dist-packages" >> /home/${NB_USER}/.bashrc && \
+    echo "source /usr/local/bin/virtualenvwrapper.sh && workon multiverse" >> /home/${NB_USER}/.bashrc
+
 # ------------------------------------------------------------
 # Python & Jupyter extensions
 # ------------------------------------------------------------
