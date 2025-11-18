@@ -37,11 +37,12 @@ RUN apt-get update -qq && \
 
 RUN curl -fsSL https://packagecloud.io/dcommander/turbovnc/gpgkey | gpg --dearmor \
       > /usr/share/keyrings/turbovnc-archive-keyring.gpg && \
-    curl -fsSL https://raw.githubusercontent.com/TurboVNC/repo/main/TurboVNC.list \
-      -o /etc/apt/sources.list.d/TurboVNC.list && \
-    sed -i "s|deb |deb [signed-by=/usr/share/keyrings/turbovnc-archive-keyring.gpg] |g" /etc/apt/sources.list.d/TurboVNC.list && \
+    ARCH=$(dpkg --print-architecture) && \
+    CODENAME=$(. /etc/os-release && echo $UBUNTU_CODENAME) && \
+    echo "deb [arch=${ARCH} signed-by=/usr/share/keyrings/turbovnc-archive-keyring.gpg] https://packagecloud.io/dcommander/turbovnc/ubuntu ${CODENAME} main" \
+      > /etc/apt/sources.list.d/turbovnc.list && \
     apt-get update -qq && apt-get install -y --no-install-recommends turbovnc && \
-    rm -f /etc/apt/sources.list.d/TurboVNC.list && rm -rf /var/lib/apt/lists/*
+    rm -f /etc/apt/sources.list.d/turbovnc.list && rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------
 # ROS 2 Jazzy
