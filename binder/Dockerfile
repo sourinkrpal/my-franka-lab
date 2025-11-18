@@ -90,6 +90,56 @@ RUN conda install -y -c conda-forge websockify code-server && \
     python -m pip install --no-cache-dir git+https://github.com/yxzhan/jupyter-code-server.git && \
     python -m pip cache purge || true && \
     echo 'alias code="$(which code-server)"' >> ~/.bashrc
+	
+# ------------------------------------------------------------
+# MULTIVERSE INSTALLATION (simple + reliable)
+# ------------------------------------------------------------
+
+USER root
+
+# Build tools and dependencies for Multiverse
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake build-essential git python3-dev python3-venv \
+    libssl-dev libffi-dev libgl1-mesa-dev libglu1-mesa-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone Multiverse (official tutorials)
+RUN git clone --depth=1 https://github.com/Multiverse-Framework/Multiverse-Tutorials.git /home/Multiverse-Tutorials && \
+    git clone --depth=1 https://github.com/Multiverse-Framework/Multiverse.git /home/Multiverse
+
+# Create Python venv for Multiverse
+RUN python3 -m venv /opt/multiverse-venv && \
+    . /opt/multiverse-venv/bin/activate && \
+    pip install --upgrade pip setuptools wheel && \
+    pip install psutil==5.9.2 pyside6 pyopengl markupsafe==2.0.1 jinja2 \
+               owlready2 urdf_parser_py mujoco==3.2.7 mujoco-mjx==3.2.7 \
+               pybind11 cython scipy panel
+
+# Build Multiverse client library
+RUN . /opt/multiverse-venv/bin/activate && \
+    cmake -S /home/Multiverse -B /home/Multiverse/build \
+          -DCMAKE_INSTALL_PREFIX=/home/Multiverse \
+          -DMULTIVERSE_CLIENT_LIBRARY_TYPE=STATIC \
+          -DSTDLIB=libstdc++ \
+          -DBUILD_SRC=ON \
+          -DBUILD_MODULES=ON \
+          -DBUILD_CONNECTORS=ON \
+          -DBUILD_KNOWLEDGE=OFF \
+          -DBUILD_PARSER=OFF \
+          -DBUILD_TESTS=OFF && \
+    make -C /home/Multiverse/build -j$(nproc) && \
+    cmake --install /home/Multiverse/build
+
+# Permission fix so Jupyter user can use it
+RUN chown -R ${NB_USER}:users /home/Multiverse && \
+    chown -R ${NB_USER}:users /home/Multiverse-Tutorials && \
+    chown -R ${NB_USER}:users /opt/multiverse-venv
+
+USER ${NB_USER}
+
+# Add Multiverse environment to the user's shell
+RUN echo "source /opt/multiverse-venv/bin/activate" >> ~/.bashrc && \
+    echo "export PYTHONPATH=\$PYTHONPATH:/home/Multiverse/lib/dist-packages" >> ~/.bashrc
 
 # ------------------------------------------------------------
 # MuJoCo menagerie
