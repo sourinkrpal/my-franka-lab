@@ -3,20 +3,21 @@
 # -----------------------------------------------------------------------------
 FROM intel4coro/jupyter-ros2:jazzy-py3.12
 
-# ------------------------------------------------------------
-# Basic env and safety
-# ------------------------------------------------------------
 USER root
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=en_US.UTF-8
 
-# Ensure NB_USER is set (most jupyter/base images define it; fallback to jovyan)
+# Notebook user (fallback to jovyan)
 ARG NB_USER=jovyan
 ENV NB_USER=${NB_USER}
 ENV NB_UID=1000
 ENV HOME=/home/${NB_USER}
 ENV PATH=/opt/TurboVNC/bin:${PATH}
 ENV DISPLAY=:1
+
+# Multiverse dirs (export as env for later runtime)
+ENV MULTIVERSE_DIR=/home/Multiverse/multiverse
+ENV MULTIVERSE_BUILD_DIR=${MULTIVERSE_DIR}/build
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -27,19 +28,13 @@ RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends \
       sudo locales gnupg2 curl wget vim git byobu tmux net-tools ca-certificates \
       apt-transport-https build-essential lsb-release software-properties-common \
-      dirmngr rsync wget unzip ca-certificates \
-      # multimedia / video dev libs (ffmpeg)
+      dirmngr rsync unzip \
       libavcodec-dev libavformat-dev libswscale-dev \
-      # linear algebra / C++ dev
       libeigen3-dev libboost-all-dev pkg-config cmake swig \
-      # python dev
       python3-venv python3-dev python3-pip python3-setuptools python3-wheel \
-      # Qt / GUI dev (for PySide6 / pyside wheels)
       qtbase5-dev qtdeclarative5-dev libqt5svg5-dev libqt5webkit5-dev \
       libxcb1-dev libx11-dev libxext-dev libxi-dev libxrandr-dev libxinerama-dev libxcursor-dev \
-      # GL / offscreen rendering / mesa
       libglu1-mesa-dev libgl1-mesa-dev libosmesa6 libosmesa6-dev libglew-dev libglfw3 libglfw3-dev \
-      # extra build helpers
       patchelf && \
     locale-gen en_US.UTF-8 && \
     echo "${NB_USER} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${NB_USER} && \
@@ -56,7 +51,7 @@ RUN apt-get update -qq && \
     apt-get remove -y --purge xfce4-screensaver || true && \
     rm -rf /var/lib/apt/lists/*
 
-# TurboVNC repository (use trusted keyring pattern)
+# TurboVNC repo (trusted keyring)
 RUN wget -q -O- https://packagecloud.io/dcommander/turbovnc/gpgkey | \
         gpg --dearmor >/etc/apt/trusted.gpg.d/TurboVNC.gpg && \
     wget -q -O /etc/apt/sources.list.d/TurboVNC.list \
@@ -67,7 +62,7 @@ RUN wget -q -O- https://packagecloud.io/dcommander/turbovnc/gpgkey | \
     rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------
-# ROS 2 Jazzy (keep your existing setup)
+# ROS 2 Jazzy
 # ------------------------------------------------------------
 ENV ROS_DISTRO=jazzy
 ENV ROS_PKG=desktop
@@ -87,73 +82,73 @@ RUN add-apt-repository -y universe && \
 RUN echo "source ${ROS_PATH}/setup.bash" >> /home/${NB_USER}/.bashrc && \
     rosdep init || true && rosdep update || true && rosdep fix-permissions || true
 
-# Optional ros package (don't fail build if not present)
+# Optional ROS package (non-fatal)
 RUN DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
     apt-get install -y --no-install-recommends ros-jazzy-topic-based-ros2-control || true && \
     rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------
-# NodeJS (for jupyterlab extensions)
+# Node.js for JupyterLab extensions
 # ------------------------------------------------------------
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------
-# Multiverse: build & install (using python venv, robust deps)
-# Place this before switching to NB_USER for pip/conda installs
+# Prepare Multiverse parent dir (root) and files (download tarball)
 # ------------------------------------------------------------
-ARG MULTIVERSE_DIR=/home/Multiverse/multiverse
-ARG BUILD_DIR=$MULTIVERSE_DIR/build
-ARG MULTIVERSE_REPO=https://github.com/MultiverseAI/multiverse.git
+RUN mkdir -p /home/Multiverse && chown -R ${NB_USER}:users /home/Multiverse
 
-# Prepare Multiverse parent dir, clone source (or change to COPY if you have local source)
-RUN mkdir -p /home/Multiverse && \
-    chown -R ${NB_USER}:users /home/Multiverse
+# Use an archive fetch rather than git clone to avoid credential or git config issues
+ARG MULTIVERSE_REPO_TARBALL=https://github.com/MultiverseAI/multiverse/archive/refs/heads/main.tar.gz
+USER root
+RUN curl -fsSL "${MULTIVERSE_REPO_TARBALL}" | tar -xzf - -C /home/Multiverse --strip-components=1 && \
+    chown -R ${NB_USER}:users /home/Multiverse && \
+    ls -la /home/Multiverse | sed -n '1,40p'
 
+# ------------------------------------------------------------
+# Create venv and install Python dependencies (as NB_USER)
+# ------------------------------------------------------------
 USER ${NB_USER}
 ENV VENV_DIR=/home/${NB_USER}/.venvs/multiverse
-RUN python3 -m venv --system-site-packages $VENV_DIR && \
+RUN mkdir -p /home/${NB_USER}/.venvs && \
+    python3 -m venv --system-site-packages $VENV_DIR && \
     $VENV_DIR/bin/python -m pip install --upgrade pip setuptools wheel
 
-# Clone multiverse as the notebook user (keeps ownership neat)
-RUN git clone --depth 1 ${MULTIVERSE_REPO} ${MULTIVERSE_DIR} || true && \
-    chown -R ${NB_USER}:users ${MULTIVERSE_DIR}
-
-# Install Python deps into the venv (use conservative stable pins where shown)
-RUN $VENV_DIR/bin/pip install --no-cache-dir \
+# install python deps into the venv (prefer binaries to reduce build time where possible)
+RUN $VENV_DIR/bin/pip install --no-cache-dir --prefer-binary \
         psutil==5.9.2 pyside6 pyopengl pyside6-wheel cython \
         owlready2 markupsafe==2.0.1 jinja2 pybind11 urdf_parser_py \
         mujoco==3.2.7 mujoco-mjx==3.2.7 scipy panel || true
 
-# Build Multiverse using the venv (activate in same shell)
+# ------------------------------------------------------------
+# Build Multiverse from source using venv (single shell activation)
+# ------------------------------------------------------------
 RUN /bin/bash -lc "source $VENV_DIR/bin/activate && \
-        mkdir -p $BUILD_DIR && \
-        cmake -S $MULTIVERSE_DIR -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX:PATH=$MULTIVERSE_DIR \
+        mkdir -p ${MULTIVERSE_BUILD_DIR} && \
+        cmake -S ${MULTIVERSE_DIR} -B ${MULTIVERSE_BUILD_DIR} -DCMAKE_INSTALL_PREFIX:PATH=${MULTIVERSE_DIR} \
           -DMULTIVERSE_CLIENT_LIBRARY_TYPE=STATIC -DSTDLIB=libstdc++ \
           -DBUILD_SRC=ON -DBUILD_MODULES=OFF -DBUILD_CONNECTORS=OFF -DBUILD_KNOWLEDGE=OFF -DBUILD_PARSER=OFF -DBUILD_TESTS=OFF && \
-        cmake -S $MULTIVERSE_DIR -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX:PATH=$MULTIVERSE_DIR \
+        cmake -S ${MULTIVERSE_DIR} -B ${MULTIVERSE_BUILD_DIR} -DCMAKE_INSTALL_PREFIX:PATH=${MULTIVERSE_DIR} \
           -DMULTIVERSE_CLIENT_LIBRARY_TYPE=STATIC -DSTDLIB=libstdc++ \
           -DBUILD_MODULES=ON -DBUILD_CONNECTORS=ON -DBUILD_KNOWLEDGE=OFF -DBUILD_PARSER=OFF -DBUILD_TESTS=OFF && \
-        make -C $BUILD_DIR -j$(nproc) && cmake --install $BUILD_DIR"
+        make -C ${MULTIVERSE_BUILD_DIR} -j$(nproc) && cmake --install ${MULTIVERSE_BUILD_DIR}"
 
-# Ensure ownership is correct and add PYTHONPATH / venv activation
+# ensure NB_USER owns Multiverse files
 USER root
 RUN chown -R ${NB_USER}:users /home/Multiverse || true
 
+# auto-activate the venv and expose PYTHONPATH to notebooks/terminals
 USER ${NB_USER}
-RUN mkdir -p /home/${NB_USER}/.venvs && \
-    echo "export VIRTUAL_ENV=$VENV_DIR" >> /home/${NB_USER}/.bashrc && \
+RUN echo "export VIRTUAL_ENV=${VENV_DIR}" >> /home/${NB_USER}/.bashrc && \
     echo "export PATH=\$VIRTUAL_ENV/bin:\$PATH" >> /home/${NB_USER}/.bashrc && \
     echo "export PYTHONPATH=\$PYTHONPATH:${MULTIVERSE_DIR}/lib/dist-packages" >> /home/${NB_USER}/.bashrc && \
-    # make sure venv activation is effective in spawned shells
     echo "source \$VIRTUAL_ENV/bin/activate >/dev/null 2>&1 || true" >> /home/${NB_USER}/.bashrc
 
 # ------------------------------------------------------------
 # Python & Jupyter extensions (user)
 # ------------------------------------------------------------
 USER ${NB_USER}
-# conda may be available in base image; using conda for some installs keeps compatibility
 RUN conda install -y -q websockify code-server -c conda-forge && \
     python -m pip install --upgrade pip setuptools==68.1.2 && \
     python -m pip install --no-cache-dir \
@@ -163,7 +158,6 @@ RUN conda install -y -q websockify code-server -c conda-forge && \
         PyQt5 PySide2 matplotlib opencv-python mujoco pybullet panda-gym[pybullet] gymnasium && \
     python -m pip cache purge || true
 
-# code-server alias and jupyter-code-server extension
 RUN echo 'alias code="$(which code-server)"' >> /home/${NB_USER}/.bashrc && \
     python -m pip install --no-cache-dir git+https://github.com/yxzhan/jupyter-code-server.git || true
 
@@ -192,13 +186,12 @@ COPY --chown=${NB_USER}:users ./ ${HOME}/work
 COPY --chown=${NB_USER}:users binder/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# optional: keep jupyter lab overrides if you have them
 COPY --chown=${NB_USER}:users binder/jupyter-settings.json /usr/local/share/jupyter/lab/settings/overrides.json || true
 
-# Final ownership safety
 USER root
 RUN chown -R ${NB_USER}:users /home/${NB_USER} || true
 USER ${NB_USER}
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["start-notebook.sh"]
+
