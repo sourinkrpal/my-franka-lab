@@ -1,3 +1,5 @@
+This is my current Dockerfile:
+
 FROM intel4coro/jupyter-ros2:jazzy-py3.12
 
 USER root
@@ -16,7 +18,7 @@ RUN apt update -qq && \
     locale-gen en_US.UTF-8
 
 # ------------------------------------------------------------
-# XFCE desktop + VNC
+# XFCE desktop + TurboVNC
 # ------------------------------------------------------------
 RUN apt update -qq && \
     apt install -y -qq dbus-x11 xfce4 xfce4-session xfce4-settings xfce4-panel \
@@ -24,11 +26,17 @@ RUN apt update -qq && \
     apt remove -y xfce4-screensaver && \
     rm -rf /var/lib/apt/lists/*
 
-# Install TigerVNC from Ubuntu repos (avoids packagecloud repo incompatible with 'noble')
-RUN apt-get update -qq && \
-    apt-get install -y --no-install-recommends tigervnc-standalone-server tigervnc-common && \
+# TurboVNC repository
+RUN wget -q -O- https://packagecloud.io/dcommander/turbovnc/gpgkey | \
+        gpg --dearmor >/etc/apt/trusted.gpg.d/TurboVNC.gpg && \
+    wget -q -O /etc/apt/sources.list.d/TurboVNC.list \
+        https://raw.githubusercontent.com/TurboVNC/repo/main/TurboVNC.list && \
+    apt update -qq && \
+    apt install -y -qq turbovnc && \
+    rm /etc/apt/sources.list.d/TurboVNC.list && \
     rm -rf /var/lib/apt/lists/*
 
+ENV PATH=/opt/TurboVNC/bin:${PATH}
 ENV DISPLAY=:1
 
 # ------------------------------------------------------------
@@ -78,69 +86,6 @@ RUN conda install -y -c conda-forge code-server && \
     pip install git+https://github.com/yxzhan/jupyter-code-server.git
 
 ENV CODE_WORKING_DIRECTORY=${HOME}
-
-# ------------------------------------------------------------
-# Multiverse Installation (robust CMake lookup)
-# ------------------------------------------------------------
-USER root
-
-# Basic build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git cmake python3-dev python3-venv build-essential \
-    libssl-dev libffi-dev libgl1-mesa-dev libglu1-mesa-dev pkg-config && \
-    rm -rf /var/lib/apt/lists/*
-
-# Clone Multiverse + Tutorials
-RUN git clone --depth 1 https://github.com/Multiverse-Framework/Multiverse.git /opt/Multiverse && \
-    git clone --depth 1 https://github.com/Multiverse-Framework/Multiverse-Tutorials.git /opt/Multiverse-Tutorials
-
-# Create Python venv for Multiverse and install Python deps
-RUN python3 -m venv /opt/multiverse-venv && \
-    . /opt/multiverse-venv/bin/activate && \
-    pip install --upgrade pip setuptools wheel && \
-    pip install psutil==5.9.2 pyside6 pyopengl markupsafe==2.0.1 jinja2 \
-               owlready2 urdf_parser_py mujoco==3.2.7 mujoco-mjx==3.2.7 \
-               pybind11 cython scipy panel || true
-
-# Build Multiverse core libraries: find CMakeLists and use its directory as source
-RUN set -eux; \
-    SRC_CMAKE=$(find /opt/Multiverse -maxdepth 5 -type f -name CMakeLists.txt -print -quit || true); \
-    if [ -z "$SRC_CMAKE" ]; then \
-      echo "No CMakeLists.txt found under /opt/Multiverse; aborting Multiverse build." >&2; \
-      ls -la /opt/Multiverse || true; \
-      exit 0; \
-    fi; \
-    SRC_DIR=$(dirname "$SRC_CMAKE"); \
-    echo "Using CMake source dir: $SRC_DIR"; \
-    mkdir -p /opt/Multiverse/build; \
-    . /opt/multiverse-venv/bin/activate && \
-    cmake -S "$SRC_DIR" -B /opt/Multiverse/build \
-          -DCMAKE_INSTALL_PREFIX=/opt/Multiverse \
-          -DMULTIVERSE_CLIENT_LIBRARY_TYPE=STATIC \
-          -DSTDLIB=libstdc++ \
-          -DBUILD_SRC=ON \
-          -DBUILD_MODULES=ON \
-          -DBUILD_CONNECTORS=ON \
-          -DBUILD_KNOWLEDGE=OFF \
-          -DBUILD_PARSER=OFF \
-          -DBUILD_TESTS=OFF; \
-    . /opt/multiverse-venv/bin/activate && \
-    make -C /opt/Multiverse/build -j$(nproc) || true; \
-    . /opt/multiverse-venv/bin/activate && \
-    cmake --install /opt/Multiverse/build || true
-
-# Give permissions to notebook user if exists
-RUN if id ${NB_USER} >/dev/null 2>&1; then \
-      chown -R ${NB_USER}:users /opt/Multiverse || true; \
-      chown -R ${NB_USER}:users /opt/Multiverse-Tutorials || true; \
-      chown -R ${NB_USER}:users /opt/multiverse-venv || true; \
-    fi
-
-USER ${NB_USER}
-
-# Auto-activate Multiverse in shell
-RUN echo "source /opt/multiverse-venv/bin/activate" >> ~/.bashrc && \
-    echo "export PYTHONPATH=\$PYTHONPATH:/opt/Multiverse/lib/dist-packages" >> ~/.bashrc
 
 # ------------------------------------------------------------
 # PyBullet + MuJoCo support
