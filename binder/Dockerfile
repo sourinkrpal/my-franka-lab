@@ -1,5 +1,3 @@
-This is my current Dockerfile:
-
 FROM intel4coro/jupyter-ros2:jazzy-py3.12
 
 USER root
