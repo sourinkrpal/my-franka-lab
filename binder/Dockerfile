@@ -115,6 +115,18 @@ RUN mkdir -p ${HOME}/.mujoco && \
 ENV LD_LIBRARY_PATH=${MUJOCO_DIR}/lib:${LD_LIBRARY_PATH}
 
 # ------------------------------------------------------------
+# Required
+# ------------------------------------------------------------
+USER root
+RUN apt update && apt install -y --no-install-recommends \
+    ros-jazzy-ros2-control \
+    ros-jazzy-ros2-controllers \
+    ros-jazzy-controller-manager \
+    ros-jazzy-control-msgs && \
+    rm -rf /var/lib/apt/lists/*
+USER ${NB_USER}
+
+# ------------------------------------------------------------
 # Multiverse installation
 # ------------------------------------------------------------
 USER ${NB_USER}
