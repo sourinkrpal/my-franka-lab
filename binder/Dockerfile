@@ -149,7 +149,7 @@ RUN set -ex && \
     if [ -d "./Multiverse-Launch/src/multiverse_connectors/multiverse_ros_connector/ros_ws/multiverse_ws2" ]; then \
       cd ./Multiverse-Launch/src/multiverse_connectors/multiverse_ros_connector/ros_ws/multiverse_ws2 && \
 	  /bin/bash -c "source /opt/ros/jazzy/setup.bash && colcon build --symlink-install" || true; \
-	  cd ${MV_ROOT};
+	  cd ${MV_ROOT}; \
     fi
 
 # ------------------------------------------------------------
