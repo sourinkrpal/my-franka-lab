@@ -148,8 +148,8 @@ RUN set -ex && \
       pip install --no-cache-dir -r ./Multiverse-Launch/src/multiverse_connectors/multiverse_simulators_connector/src/mujoco_connector/requirements.txt || true; fi && \
     if [ -d "./Multiverse-Launch/src/multiverse_connectors/multiverse_ros_connector/ros_ws/multiverse_ws2" ]; then \
       cd ./Multiverse-Launch/src/multiverse_connectors/multiverse_ros_connector/ros_ws/multiverse_ws2 && \
-      colcon build --symlink-install || true; \
-      cd ${MV_ROOT}; \
+	  /bin/bash -c "source /opt/ros/jazzy/setup.bash && colcon build --symlink-install" || true; \
+	  cd ${MV_ROOT};
     fi
 
 # ------------------------------------------------------------
