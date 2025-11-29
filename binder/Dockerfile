@@ -101,6 +101,46 @@ RUN git clone --depth 1 https://github.com/google-deepmind/mujoco_menagerie.git 
         ${HOME}/work/notebooks/mujoco_menagerie || true
 
 # ------------------------------------------------------------
+# MuJoCo for Multiverse (required!)
+# ------------------------------------------------------------
+USER ${NB_USER}
+ENV MUJOCO_VERSION=3.1.2
+ENV MUJOCO_DIR=${HOME}/.mujoco/mujoco-${MUJOCO_VERSION}
+
+RUN mkdir -p ${HOME}/.mujoco && \
+    wget -q https://github.com/google-deepmind/mujoco/releases/download/${MUJOCO_VERSION}/mujoco-${MUJOCO_VERSION}-linux-x86_64.tar.gz && \
+    tar -xf mujoco-${MUJOCO_VERSION}-linux-x86_64.tar.gz -C ${HOME}/.mujoco && \
+    rm mujoco-${MUJOCO_VERSION}-linux-x86_64.tar.gz
+
+ENV LD_LIBRARY_PATH=${MUJOCO_DIR}/lib:${LD_LIBRARY_PATH}
+
+# ------------------------------------------------------------
+# Multiverse installation
+# ------------------------------------------------------------
+USER ${NB_USER}
+ENV MV_ROOT=${HOME}/Multiverse
+ENV MULTIVERSE_REPO=https://github.com/Multiverse-Framework/Multiverse
+ENV MULTIVERSE_BRANCH=main
+
+RUN set -ex && \
+    mkdir -p ${MV_ROOT} && \
+    cd ${HOME} && \
+    git clone --recurse-submodules --depth 1 --branch ${MULTIVERSE_BRANCH} ${MULTIVERSE_REPO} ${MV_ROOT} || \
+      (cd ${MV_ROOT} && git submodule update --init --recursive) && \
+    cd ${MV_ROOT} && \
+    if [ -f "./Multiverse-Launch/requirements.txt" ]; then \
+      pip install --no-cache-dir -r ./Multiverse-Launch/requirements.txt; fi && \
+    if [ -f "./Multiverse-Utilities/requirements.txt" ]; then \
+      pip install --no-cache-dir -r ./Multiverse-Utilities/requirements.txt; fi && \
+    if [ -f "./Multiverse-Launch/src/multiverse_connectors/multiverse_simulators_connector/src/mujoco_connector/requirements.txt" ]; then \
+      pip install --no-cache-dir -r ./Multiverse-Launch/src/multiverse_connectors/multiverse_simulators_connector/src/mujoco_connector/requirements.txt || true; fi && \
+    if [ -d "./Multiverse-Launch/src/multiverse_connectors/multiverse_ros_connector/ros_ws/multiverse_ws2" ]; then \
+      cd ./Multiverse-Launch/src/multiverse_connectors/multiverse_ros_connector/ros_ws/multiverse_ws2 && \
+      colcon build --symlink-install || true; \
+      cd ${MV_ROOT}; \
+    fi
+
+# ------------------------------------------------------------
 # Copy notebooks & set entrypoint
 # ------------------------------------------------------------
 WORKDIR ${HOME}/work
